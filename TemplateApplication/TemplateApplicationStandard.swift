@@ -1,0 +1,120 @@
+//
+// This source file is part of the Stanford Spezi Template Application open-source project
+//
+// SPDX-FileCopyrightText: 2023 Stanford University
+//
+// SPDX-License-Identifier: MIT
+//
+
+@preconcurrency import FirebaseFirestore
+import HealthKitOnFHIR
+import OSLog
+@preconcurrency import PDFKit.PDFDocument
+import Spezi
+import SpeziAccount
+import SpeziConsent
+import SpeziFirebaseAccount
+import SpeziFirestore
+import SpeziHealthKit
+import SwiftUI
+
+
+actor TemplateApplicationStandard: Standard,
+                                   EnvironmentAccessible,
+                                   HealthKitConstraint,
+                                   AccountNotifyConstraint {
+    @Application(\.logger) var logger
+
+    @Dependency(FirebaseConfiguration.self) var configuration
+    
+    
+    init() {}
+    
+    
+    func handleNewSamples<Sample>(_ addedSamples: some Collection<Sample>, ofType sampleType: SampleType<Sample>) async {
+        for sample in addedSamples {
+            if FeatureFlags.disableFirebase {
+                logger.debug("Received new HealthKit sample: \(sample)")
+                return
+            }
+            
+            do {
+                try await healthKitDocument(for: sampleType, sampleId: sample.id)
+                    .setData(from: sample.resource())
+            } catch {
+                logger.error("Could not store HealthKit sample: \(error)")
+            }
+        }
+    }
+    
+    func handleDeletedObjects<Sample>(_ deletedObjects: some Collection<HKDeletedObject>, ofType sampleType: SampleType<Sample>) async {
+        for object in deletedObjects {
+            if FeatureFlags.disableFirebase {
+                logger.debug("Received new removed healthkit sample with id \(object.uuid)")
+                return
+            }
+            
+            do {
+                try await healthKitDocument(for: sampleType, sampleId: object.uuid).delete()
+            } catch {
+                logger.error("Could not remove HealthKit sample: \(error)")
+            }
+        }
+    }
+    
+    private func healthKitDocument(for sampleType: SampleType<some Any>, sampleId uuid: UUID) async throws -> FirebaseFirestore.DocumentReference {
+        try await configuration.userDocumentReference
+            .collection("Observations_\(sampleType.displayTitle.replacingOccurrences(of: "\\s", with: "", options: .regularExpression))")
+            .document(uuid.uuidString)
+    }
+    
+    func respondToEvent(_ event: AccountNotifications.Event) async {
+        if case let .deletingAccount(accountId) = event {
+            do {
+                try await configuration.userDocumentReference(for: accountId).delete()
+            } catch {
+                logger.error("Could not delete user document: \(error)")
+            }
+        }
+    }
+    
+    /// Stores the given consent form in the user's document directory with a unique timestamped filename.
+    ///
+    /// - Parameter consent: The consent form's data to be stored as a `PDFDocument`.
+    func store(consent: ConsentDocument) async throws {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HHmmss"
+        let dateString = formatter.string(from: Date())
+        let exportOptions = ConsentDocument.ExportConfiguration(paperSize: .usLetter)
+        
+        guard !FeatureFlags.disableFirebase else {
+            guard let basePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                logger.error("Could not create path for writing consent form to user document directory.")
+                return
+            }
+            
+            let filePath = basePath.appending(path: "consentForm_\(dateString).pdf")
+            try await consent.export(using: exportOptions).pdf.write(to: filePath)
+            
+            return
+        }
+        
+        do {
+            guard let consentPDFData = try? await consent.export(using: exportOptions).pdf.dataRepresentation() else {
+                logger.error("Could not store consent form.")
+                return
+            }
+
+            try await configuration.userDocumentReference
+                .collection("consent")
+                .document(dateString)
+                .setData([
+                    "pdfBase64": consentPDFData.base64EncodedString(),
+                    "contentType": "application/pdf",
+                    "signedAt": FieldValue.serverTimestamp()
+                ])
+        } catch {
+            logger.error("Could not store consent form: \(error)")
+        }
+    }
+}
