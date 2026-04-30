@@ -37,9 +37,8 @@ struct OnboardingFlow: View {
     
     var body: some View {
         ManagedNavigationStack(didComplete: $completedOnboardingFlow) {
-            Welcome()
             InterestingModules()
-            
+
             if !FeatureFlags.disableFirebase {
                 AccountOnboarding()
             }

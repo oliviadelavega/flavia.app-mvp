@@ -165,7 +165,17 @@ final class MealDictation {
                     self.transcript = transcript
                 }
                 guard isFinal || errorMessage != nil else { return }
+                // If the user already stopped (status is idle/denied/etc.), the
+                // recognizer's trailing error is just the cancellation echo —
+                // ignore it so we don't show a spurious "Dictation unavailable".
+                let stillActive: Bool = {
+                    switch self.status {
+                    case .recording, .starting: return true
+                    default: return false
+                    }
+                }()
                 self.cleanup()
+                guard stillActive else { return }
                 if let errorMessage {
                     self.status = .failed(errorMessage)
                 } else {

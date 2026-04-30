@@ -63,7 +63,6 @@ extension XCUIApplication {
         email: String = "leland@stanford.edu",
         repeated skippedIfRepeated: Bool = false
     ) throws {
-        try navigateOnboardingFlowWelcome()
         try navigateOnboardingFlowInterestingModules()
         if staticTexts["Your Account"].waitForExistence(timeout: 2.0) {
             try navigateOnboardingAccount(email: email)
@@ -77,15 +76,8 @@ extension XCUIApplication {
         }
     }
     
-    private func navigateOnboardingFlowWelcome() throws {
-        XCTAssertTrue(staticTexts["Spezi\nTemplate Application"].waitForExistence(timeout: 5))
-        
-        XCTAssertTrue(buttons["Learn More"].exists)
-        buttons["Learn More"].tap()
-    }
-    
     private func navigateOnboardingFlowInterestingModules() throws {
-        XCTAssertTrue(staticTexts["Interesting Modules"].waitForExistence(timeout: 5))
+        XCTAssertTrue(staticTexts["Flavia"].waitForExistence(timeout: 5))
         
         for _ in 1..<4 {
             XCTAssertTrue(buttons["Next"].waitForExistence(timeout: 2))

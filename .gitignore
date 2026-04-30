@@ -62,5 +62,8 @@ firebase-debug.*.log*
 # Firebase cache
 .firebase/
 
+# Local Firestore exports (Scripts/export_firestore.py output)
+firestore_export/
+
 # Swift Package List
 TemplateApplication/package-list.json
