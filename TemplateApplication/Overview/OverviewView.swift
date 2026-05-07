@@ -28,6 +28,7 @@ struct OverviewView: View {
         NavigationStack {
             content
                 .navigationTitle("Overview")
+                .brandIvoryBackground()
                 .viewStateAlert(state: $viewState)
                 .refreshable { await load() }
                 .task { await load() }

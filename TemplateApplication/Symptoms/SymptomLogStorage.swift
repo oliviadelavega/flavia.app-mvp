@@ -25,4 +25,21 @@ extension TemplateApplicationStandard {
             .document(documentID)
             .setData(from: log, merge: true)
     }
+
+    /// Returns the existing symptom log for the given calendar date, or nil if none has been recorded yet.
+    func fetchSymptomLog(for date: Date = Date()) async throws -> SymptomLog? {
+        if FeatureFlags.disableFirebase {
+            return nil
+        }
+
+        let documentID = SymptomLogDate.documentID(for: date)
+        let snapshot = try await configuration.userDocumentReference
+            .collection("symptomLogs")
+            .document(documentID)
+            .getDocument()
+        guard snapshot.exists else {
+            return nil
+        }
+        return try snapshot.data(as: SymptomLog.self)
+    }
 }

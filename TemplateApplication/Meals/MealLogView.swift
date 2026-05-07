@@ -24,6 +24,15 @@ struct MealLogView: View {
     @State private var dictationAlertMessage: String?
     @State private var suggester = MealTagSuggester()
     @State private var lastSuggestedFor: String?
+    @State private var customTags: [String] = []
+    @State private var newCustomTag: String = ""
+    @State private var customTagError: String?
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case description
+        case customTag
+    }
 
 
     var body: some View {
@@ -35,26 +44,24 @@ struct MealLogView: View {
                 saveSection
             }
             .navigationTitle("Meals")
+            .brandIvoryBackground()
+            .task { await loadCustomTags() }
             .viewStateAlert(state: $viewState)
             .alert("Saved", isPresented: $showSavedConfirmation) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("Meal entry recorded.")
             }
-            .alert(
-                "Dictation unavailable",
-                isPresented: Binding(
-                    get: { dictationAlertMessage != nil },
-                    set: { if !$0 { dictationAlertMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(dictationAlertMessage ?? "")
-            }
+            .modifier(DictationAlertModifier(message: $dictationAlertMessage))
             .toolbar {
                 if account != nil {
                     AccountButton(isPresented: $presentingAccount)
+                }
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }
                 }
             }
         }
@@ -77,6 +84,7 @@ struct MealLogView: View {
                 axis: .vertical
             )
             .lineLimit(2...4)
+            .focused($focusedField, equals: .description)
             .disabled(dictation.isRecording)
 
             dictationButton
@@ -166,9 +174,30 @@ struct MealLogView: View {
     @ViewBuilder private var tagsSection: some View {
         Section("Tags") {
             ChipMultiSelect(
-                options: MealVocabulary.tags,
+                options: MealVocabulary.tags + customTags,
                 selection: $log.tags
             )
+            addCustomTagRow
+        }
+    }
+
+    @ViewBuilder private var addCustomTagRow: some View {
+        HStack {
+            TextField("Add custom tag", text: $newCustomTag)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: .customTag)
+                .submitLabel(.done)
+                .onSubmit { Task { await addCustomTag() } }
+            Button("Add") {
+                Task { await addCustomTag() }
+            }
+            .disabled(newCustomTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        if let customTagError {
+            Text(customTagError)
+                .font(.caption)
+                .foregroundStyle(.red)
         }
     }
 
@@ -192,8 +221,37 @@ struct MealLogView: View {
     private var canSave: Bool {
         !(log.description?.isEmpty ?? true) || !log.tags.isEmpty
     }
+}
 
-    private func toggleDictation() async {
+
+private struct DictationAlertModifier: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Dictation unavailable",
+            isPresented: Binding(
+                get: { message != nil },
+                set: { if !$0 { message = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(message ?? "")
+        }
+    }
+}
+
+
+extension MealLogView {
+    fileprivate enum SuggestionTrigger {
+        /// Auto-fired right after the user stops dictating.
+        case dictationStopped
+        /// User tapped the "Polish & tag" button.
+        case manual
+    }
+
+    fileprivate func toggleDictation() async {
         if dictation.isRecording {
             dictation.stop()
         } else {
@@ -202,14 +260,7 @@ struct MealLogView: View {
         }
     }
 
-    private enum SuggestionTrigger {
-        /// Auto-fired right after the user stops dictating.
-        case dictationStopped
-        /// User tapped the "Polish & tag" button.
-        case manual
-    }
-
-    private func applySuggestions(trigger: SuggestionTrigger) async {
+    fileprivate func applySuggestions(trigger: SuggestionTrigger) async {
         let raw = (log.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
             return
@@ -226,13 +277,52 @@ struct MealLogView: View {
 
         log.description = suggestion.cleanedDescription
         // Union with existing user-selected tags so a manual chip stays selected
-        // even if the model didn't pick it. Keep canonical vocabulary order.
+        // even if the model didn't pick it. Built-ins first in canonical order,
+        // then user-selected custom tags appended (the suggester only emits
+        // built-in vocabulary, so custom tags only survive if already selected).
         let combined = Set(log.tags).union(suggestion.tags)
-        log.tags = MealVocabulary.tags.filter { combined.contains($0) }
+        let builtIns = MealVocabulary.tags.filter { combined.contains($0) }
+        let customs = customTags.filter { combined.contains($0) }
+        log.tags = builtIns + customs
         lastSuggestedFor = suggestion.cleanedDescription
     }
 
-    private func save() async {
+    fileprivate func loadCustomTags() async {
+        do {
+            customTags = try await standard.fetchCustomMealTags()
+        } catch {
+            // Silent — the form still works with built-in tags only.
+        }
+    }
+
+    fileprivate func addCustomTag() async {
+        customTagError = nil
+        let normalized = newCustomTag
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return }
+        guard normalized.count <= 30 else {
+            customTagError = "Tags must be 30 characters or fewer."
+            return
+        }
+        if MealVocabulary.tags.contains(normalized) || customTags.contains(normalized) {
+            customTagError = "\"\(normalized)\" is already in your tags."
+            return
+        }
+
+        do {
+            try await standard.addCustomMealTag(normalized)
+            customTags.append(normalized)
+            if !log.tags.contains(normalized) {
+                log.tags.append(normalized)
+            }
+            newCustomTag = ""
+        } catch {
+            customTagError = "Couldn't save tag. Try again."
+        }
+    }
+
+    fileprivate func save() async {
         if dictation.isRecording {
             dictation.stop()
         }

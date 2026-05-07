@@ -74,6 +74,18 @@
         }
       }
     },
+    "Add" : {
+
+    },
+    "Add custom body part" : {
+
+    },
+    "Add custom tag" : {
+
+    },
+    "Add custom topical" : {
+
+    },
     "Affected: %@" : {
 
     },
@@ -301,10 +313,16 @@
     "Dictation unavailable" : {
 
     },
+    "Done" : {
+
+    },
     "e.g. oatmeal with berries" : {
 
     },
     "Eczema severity" : {
+
+    },
+    "Editing today's check-in. Your previous answers are pre-filled — adjust anything that's changed." : {
 
     },
     "Environment" : {
@@ -935,6 +953,9 @@
     "Today's check-in was recorded." : {
 
     },
+    "Today's check-in was updated." : {
+
+    },
     "Topicals used today" : {
 
     },
@@ -966,6 +987,9 @@
           }
         }
       }
+    },
+    "Update check-in" : {
+
     },
     "Used for UV, air quality, and pollen." : {
 
